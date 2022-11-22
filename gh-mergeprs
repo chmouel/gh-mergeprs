@@ -9,6 +9,7 @@ search_label=${GH_MERGEPRS_LABEL:-""}
 skip_asking=
 list_args=()
 check_failures=
+all_prs=
 
 print_help() {
     cat <<EOF
@@ -16,14 +17,18 @@ mergebump -- merge bump prs easily
 
 -l=LABEL  use this label to filter which dependencies
 -s        skip asking questions if we want to merge or not
+-a        do not ask for selections, use them all (dangerous)
 -c        check for any failures in Github checks and skip if there is any
 
 Author: Chmouel Boudjnah <chmouel@chmouel.com>
 EOF
 }
 
-while getopts "scl:h" o; do
+while getopts "ascl:h" o; do
     case "${o}" in
+    a)
+        all_prs=true
+        ;;
     c)
         check_failures=true
         ;;
@@ -61,7 +66,12 @@ trap clean EXIT
     exit 0
 }
 
-prs=$(fzf --ansi --preview "pn={};pn=\${pn#\#};pn=\${pn/ *};env CLICOLOR_FORCE=1 gh pr view \${pn}" <${TMP})
+if [[ -n ${all_prs} ]]; then
+    prs=$(sed 's/^#//g;s/ .*//' ${TMP})
+else
+    prs=$(fzf --ansi --preview "pn={};pn=\${pn#\#};pn=\${pn/ *};env CLICOLOR_FORCE=1 gh pr view \${pn}" <${TMP})
+fi
+
 [[ -z ${prs} ]] && {
     echo "no pr has been selected"
     exit

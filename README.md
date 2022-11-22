@@ -34,6 +34,8 @@ If you add the flag `-c` it will use the `gh pr checks` command to check if the 
 
 by default it will ask you if you want to merge the pr, unless you specify the option `-s`
 
+When you add  the flag `-a` it will not ask you with fzf which PR but select all of them. Usually combined with the `-s` flag. This may be dangerous if you don't combine it with the `-c` flag
+
 ## Copyright
 
 [Apache-2.0](./LICENSE)
