@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Copyright 2022 Chmouel Boudjnah <chmouel@chmouel.com>
+# This will merge PRs accoding to a label
+# I use this to merge the merge bump from dependabot easily
+# it will not merge PR if you have a Check failure, unless you add the -f flag.
+# need gh/bash (tho!!) and optionally jq
+set -eufo pipefail
+search_label=${GH_MERGEPRS_LABEL:-""}
+skip_asking=
+list_args=()
+check_failures=
+
+print_help() {
+    cat <<EOF
+mergebump -- merge bump prs easily
+
+-l=LABEL  use this label to filter which dependencies
+-s        skip asking questions if we want to merge or not
+-c        check for any failures in Github checks and skip if there is any
+
+Author: Chmouel Boudjnah <chmouel@chmouel.com>
+EOF
+}
+
+while getopts "scl:h" o; do
+    case "${o}" in
+    c)
+        check_failures=true
+        ;;
+    s)
+        skip_asking=true
+        ;;
+    l)
+        search_label=${OPTARG}
+        ;;
+    h)
+        print_help
+        exit 0
+        ;;
+    *)
+        echo "Invalid option"
+        print_help
+        exit 1
+        ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+[[ -n ${search_label} ]] && list_args+=("-l ${search_label}")
+
+TMP=$(mktemp /tmp/.mm.XXXXXX)
+clean() { rm -f ${TMP}; }
+trap clean EXIT
+
+(gh pr list ${list_args[*]} --state open --json number,title --jq '.[] | ("#"+(.number|tostring) + " " + .title)' || true) >${TMP}
+
+[[ -s ${TMP} ]] || {
+    extra=
+    [[ -n ${search_label} ]] && extra=" with the label '${search_label}'"
+    echo "no pullrequest${extra} has been found"
+    exit 0
+}
+
+prs=$(fzf --ansi --preview "pn={};pn=\${pn#\#};pn=\${pn/ *};env CLICOLOR_FORCE=1 gh pr view \${pn}" <${TMP})
+[[ -z ${prs} ]] && {
+    echo "no pr has been selected"
+    exit
+}
+
+IFS=$'\n'
+for pr in ${prs}; do
+    prn=${pr/ */}
+    prn=${prn/\#/}
+    if [[ -n ${check_failures} ]]; then
+        cRo=$(gh pr view ${prn} --json commits,headRepositoryOwner,headRepository --jq '.commits[-1].oid + "," + .headRepositoryOwner.login + "/" + .headRepository.name')
+        commit=${cRo/,*/}
+        repoOwner=${cRo/*,/}
+        gh api repos/${repoOwner}/commits/${commit}/check-runs --jq '.check_runs[] | select(.conclusion!="success")' >${TMP}
+        cp ${TMP} /tmp/fF.json
+        if [[ -s ${TMP} ]]; then
+            echo "pull request #${prn} has no succesfull status"
+            type -p jq >/dev/null 2>/dev/null &&
+                jq -r "(\" • \" + .name + \" workflow conclusion is \" + .conclusion)" ${TMP}
+            continue
+        fi
+    fi
+
+    if [[ -z ${skip_asking} ]]; then
+        gh pr view ${prn}
+        read -e -n1 -p "merge #${prn}? " ANSWER
+        [[ ${ANSWER,,} == "n" ]] && continue
+    fi
+
+    gh pr merge -m ${prn}
+done
